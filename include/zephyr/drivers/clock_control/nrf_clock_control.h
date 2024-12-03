@@ -299,6 +299,31 @@ int nrf_clock_control_cancel_or_release(const struct device *dev,
 	return api->cancel_or_release(dev, spec, cli);
 }
 
+/** @brief Request a clock from Zero Latency Interrupt context.
+ *
+ * Function is optimized for use in Zero Latency Interrupt context.
+ * It requests a clock provided by pointer to device. It does not
+ * give notification when a clock is ready, so each user must put
+ * the request early enough to make sure the clock ramp-up has
+ * finished on time.
+ *
+ * Function does reference counting so the caller must ensure that
+ * every nrf_clock_control_request_zli has matching nrf_clock_-
+ * control_hfxo_release call.
+ */
+void nrf_clock_control_hfxo_request();
+
+/** @brief Release a clock from Zero Latency Interrupt context.
+ *
+ * Function is optimized for use in Zero Latency Interrupt context.
+ * It releases a clock provided by pointer to device.
+ *
+ * The function use must be preceded by nrf_clock_control_hfxo_request
+ * call, because it uses basic reference counting to make sure the
+ * clock is relased when there is no more pending requests.
+ */
+void nrf_clock_control_hfxo_release();
+
 #endif /* defined(CONFIG_CLOCK_CONTROL_NRF2) */
 
 #ifdef __cplusplus

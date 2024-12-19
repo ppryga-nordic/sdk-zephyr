@@ -41,7 +41,9 @@ __weak void boot_banner(void)
 	  */
 	printk("\x1b[3J\x1b[2J\x1b[H");
 #endif /* CONFIG_BOOT_CLEAR_SCREEN */
-
+#if defined(CONFIG_SOC_SERIES_NRF54HX)
+	printk("RESETINFO %x\n", *((uint32_t*) 0x5201E4A0));
+#endif /* CONFIG_SOC_SERIES_NRF54HX */
 #ifdef CONFIG_BOOT_BANNER
 	printk("*** " CONFIG_BOOT_BANNER_STRING " " BANNER_VERSION BANNER_POSTFIX " ***\n");
 #endif /* CONFIG_BOOT_BANNER */

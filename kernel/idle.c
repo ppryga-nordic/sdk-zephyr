@@ -9,6 +9,7 @@
 #include <zephyr/linker/sections.h>
 #include <zephyr/drivers/timer/system_timer.h>
 #include <zephyr/pm/pm.h>
+#include <zephyr/cache.h>
 #include <stdbool.h>
 #include <zephyr/logging/log.h>
 /* private kernel APIs */
@@ -16,7 +17,11 @@
 #include <kswap.h>
 #include <wait_q.h>
 
+#include <hal/nrf_cache.h>
+
 LOG_MODULE_DECLARE(os, CONFIG_KERNEL_LOG_LEVEL);
+
+#define USE_CACHE_STORE_RESTORE
 
 void idle(void *unused1, void *unused2, void *unused3)
 {
@@ -71,7 +76,28 @@ void idle(void *unused1, void *unused2, void *unused3)
 			k_cpu_idle();
 		}
 #else
+#if defined(CONFIG_SOC_NRF54H20_CPURAD) && defined(USE_CACHE_STORE_RESTORE)
+		nrf_cache_profiling_counters_clear(NRF_ICACHE);
+		nrf_cache_profiling_set(NRF_ICACHE, true);
+
+		for (volatile int i = 0; i < 10; i++);
+
+		nrf_cache_task_trigger(NRF_DCACHE, NRF_CACHE_TASK_SAVE);
+		//stop profiling before move on. That data must be != 0 to give an informaation if power down happened
+		nrf_cache_profiling_set(NRF_ICACHE, false);
+		nrf_cache_task_trigger(NRF_ICACHE, NRF_CACHE_TASK_SAVE);
+#endif /* CONFIG_SOC_NRF54H20_CPURAD && USE_CACHE_STORE_RESTORE*/
 		k_cpu_idle();
+
+#if defined(CONFIG_SOC_NRF54H20_CPURAD) && defined(USE_CACHE_STORE_RESTORE)
+		if (NRF_ICACHE->PROFILING.READS == 0) {
+			nrf_cache_task_trigger(NRF_ICACHE, NRF_CACHE_TASK_RESTORE);
+			nrf_cache_task_trigger(NRF_DCACHE, NRF_CACHE_TASK_RESTORE);
+		} else {
+			nrf_cache_enable(NRF_ICACHE);
+			nrf_cache_enable(NRF_DCACHE);
+		}
+#endif /* CONFIG_SOC_NRF54H20_CPURAD && USE_CACHE_STORE_RESTORE*/
 #endif /* CONFIG_PM */
 
 #if !defined(CONFIG_PREEMPT_ENABLED)

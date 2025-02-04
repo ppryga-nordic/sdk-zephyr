@@ -10,6 +10,7 @@
 #include <zephyr/arch/common/pm_s2ram.h>
 #include <hal/nrf_resetinfo.h>
 #include <hal/nrf_memconf.h>
+#include <hal/nrf_cache.h>
 #include <zephyr/cache.h>
 #include <power.h>
 #include <soc_lrcconf.h>
@@ -18,43 +19,87 @@
 
 extern sys_snode_t soc_node;
 
+//#define USE_CACHE_STORE_RESTORE
+//#define USE_CACHE_STORE_RESTORE_WFI
+
+#if !defined(CONFIG_SOC_NRF54H20_CPURAD) || (defined(CONFIG_SOC_NRF54H20_CPURAD) && !defined(USE_CACHE_STORE_RESTORE) && !defined(USE_CACHE_STORE_RESTORE_WFI))
+#define USE_CACHE_DISABLE_STRATEGY
+#elif defined(CONFIG_SOC_NRF54H20_CPURAD) && defined(USE_CACHE_STORE_RESTORE)
+#define USE_CACHE_STORE_RESTORE_STRATEGY
+#elif defined(CONFIG_SOC_NRF54H20_CPURAD) && defined(USE_CACHE_STORE_RESTORE_WFI)
+#define USE_CACHE_STORE_RESTORE_STRATEGY_WFI
+#else
+#error Unupported CACHE stratedy
+#endif
+
 static void common_suspend(void)
 {
+#if defined(USE_CACHE_STORE_RESTORE_STRATEGY)
+		nrf_cache_profiling_counters_clear(NRF_ICACHE);
+		nrf_cache_profiling_set(NRF_ICACHE, true);
+		nrf_cache_task_trigger(NRF_DCACHE, NRF_CACHE_TASK_SAVE);
+		//stop profiling before move on. That data must be != 0 to give an informaation if power down happened
+		nrf_cache_profiling_set(NRF_ICACHE, false);
+		nrf_cache_task_trigger(NRF_ICACHE, NRF_CACHE_TASK_SAVE);
+#endif /* USE_CACHE_STORE_RESTORE_STRATEGY */
+
 	if (IS_ENABLED(CONFIG_DCACHE)) {
+#if defined(USE_CACHE_DISABLE_STRATEGY)
 		/* Flush, disable and power down DCACHE */
 		sys_cache_data_flush_all();
 		sys_cache_data_disable();
 		nrf_memconf_ramblock_control_enable_set(NRF_MEMCONF, RAMBLOCK_POWER_ID,
 							RAMBLOCK_CONTROL_BIT_DCACHE, false);
+#endif /* USE_CACHE_DISABLE_STRATEGY */
 	}
 
 	if (IS_ENABLED(CONFIG_ICACHE)) {
+#if defined(USE_CACHE_DISABLE_STRATEGY)
 		/* Disable and power down ICACHE */
 		sys_cache_instr_disable();
 		nrf_memconf_ramblock_control_enable_set(NRF_MEMCONF, RAMBLOCK_POWER_ID,
 							RAMBLOCK_CONTROL_BIT_ICACHE, false);
+#endif /* USE_CACHE_DISABLE_STRATEGY */
 	}
 
+#if defined(USE_CACHE_DISABLE_STRATEGY)
 	soc_lrcconf_poweron_release(&soc_node, NRF_LRCCONF_POWER_DOMAIN_0);
+#endif /* USE_CACHE_DISABLE_STRATEGY */
 }
 
 static void common_resume(void)
 {
+#if defined(USE_CACHE_STORE_RESTORE_STRATEGY)
+	if (NRF_ICACHE->PROFILING.READS == 0) {
+		nrf_cache_task_trigger(NRF_ICACHE, NRF_CACHE_TASK_RESTORE);
+		nrf_cache_task_trigger(NRF_DCACHE, NRF_CACHE_TASK_RESTORE);
+	} else {
+		nrf_cache_enable(NRF_ICACHE);
+		nrf_cache_enable(NRF_DCACHE);
+	}
+#endif /* USE_CACHE_STORE_RESTORE_STRATEGY */
+
 	if (IS_ENABLED(CONFIG_ICACHE)) {
+#if defined(USE_CACHE_DISABLE_STRATEGY)
 		/* Power up and re-enable ICACHE */
 		nrf_memconf_ramblock_control_enable_set(NRF_MEMCONF, RAMBLOCK_POWER_ID,
 							RAMBLOCK_CONTROL_BIT_ICACHE, true);
 		sys_cache_instr_enable();
+#endif /* USE_CACHE_DISABLE_STRATEGY */
 	}
 
 	if (IS_ENABLED(CONFIG_DCACHE)) {
+#if defined(USE_CACHE_DISABLE_STRATEGY)
 		/* Power up and re-enable DCACHE */
 		nrf_memconf_ramblock_control_enable_set(NRF_MEMCONF, RAMBLOCK_POWER_ID,
 							RAMBLOCK_CONTROL_BIT_DCACHE, true);
 		sys_cache_data_enable();
+#endif /* USE_CACHE_STORE_RESTORE_STRATEGY */
 	}
 
+#if defined(USE_CACHE_DISABLE_STRATEGY)
 	soc_lrcconf_poweron_request(&soc_node, NRF_LRCCONF_POWER_DOMAIN_0);
+#endif /* USE_CACHE_DISABLE_STRATEGY */
 }
 
 void nrf_poweroff(void)
@@ -74,6 +119,7 @@ void nrf_poweroff(void)
 	__set_BASEPRI(0);
 	__ISB();
 	__DSB();
+	
 	__WFI();
 
 	CODE_UNREACHABLE;
@@ -100,6 +146,15 @@ static void s2idle_enter(uint8_t substate_id)
 	__set_BASEPRI(0);
 	__ISB();
 	__DSB();
+#if defined(USE_CACHE_STORE_RESTORE_STRATEGY_WFI)
+		nrf_cache_profiling_counters_clear(NRF_ICACHE);
+		nrf_cache_profiling_set(NRF_ICACHE, true);
+
+		nrf_cache_task_trigger(NRF_DCACHE, NRF_CACHE_TASK_SAVE);
+		//stop profiling before move on. That data must be != 0 to give an informaation if power down happened
+		nrf_cache_profiling_set(NRF_ICACHE, false);
+		nrf_cache_task_trigger(NRF_ICACHE, NRF_CACHE_TASK_SAVE);
+#endif /* USE_CACHE_STORE_RESTORE_STRATEGY_WFI */
 	__WFI();
 }
 
@@ -177,6 +232,15 @@ void pm_state_set(enum pm_state state, uint8_t substate_id)
 		__disable_irq();
 		s2idle_enter(substate_id);
 		/* Resume here. */
+#if defined(USE_CACHE_STORE_RESTORE_STRATEGY_WFI)
+	if (NRF_ICACHE->PROFILING.READS == 0) {
+		nrf_cache_task_trigger(NRF_ICACHE, NRF_CACHE_TASK_RESTORE);
+		nrf_cache_task_trigger(NRF_DCACHE, NRF_CACHE_TASK_RESTORE);
+	} else {
+		nrf_cache_enable(NRF_ICACHE);
+		nrf_cache_enable(NRF_DCACHE);
+	}
+#endif /* USE_CACHE_STORE_RESTORE_STRATEGY_WFI */
 		s2idle_exit(substate_id);
 		__enable_irq();
 	}

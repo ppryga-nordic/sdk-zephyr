@@ -8,11 +8,14 @@
 #include <zephyr/pm/policy.h>
 #include <zephyr/sys_clock.h>
 #include <zephyr/pm/device.h>
+#include <hal/nrf_gpio.h>
 
 extern int32_t max_latency_cyc;
 
 const struct pm_state_info *pm_policy_next_state(uint8_t cpu, int32_t ticks)
 {
+	nrf_gpio_pin_set(NRF_GPIO_PIN_MAP(0, 5));
+	
 	int64_t cyc = -1;
 	uint8_t num_cpu_states;
 	const struct pm_state_info *cpu_states;
@@ -49,9 +52,12 @@ const struct pm_state_info *pm_policy_next_state(uint8_t cpu, int32_t ticks)
 
 		if ((cyc < 0) ||
 		    (cyc >= (min_residency_cyc + exit_latency_cyc))) {
+			nrf_gpio_pin_clear(NRF_GPIO_PIN_MAP(0, 5));
+
 			return state;
 		}
 	}
 
+	nrf_gpio_pin_clear(NRF_GPIO_PIN_MAP(0, 5));
 	return NULL;
 }
